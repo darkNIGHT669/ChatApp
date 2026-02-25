@@ -4,30 +4,28 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { usePresenceMap } from "@/hooks/usePresence";
-import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
 import { Id } from "@/convex/_generated/dataModel";
+
+/**
+ * ChatHeader accepts any object that has at least _id, name, imageUrl.
+ * Using a loose interface with [key: string]: unknown allows Convex's
+ * full user document (with extra fields like clerkId, email) to be passed
+ * without TypeScript complaining about extra properties.
+ */
+interface OtherUser {
+  _id: Id<"users">;
+  name: string;
+  imageUrl: string;
+  [key: string]: unknown;
+}
 
 interface ChatHeaderProps {
   conversation: {
     _id: Id<"conversations">;
-    otherUsers: Array<{
-      _id: Id<"users">;
-      name: string;
-      imageUrl: string;
-    }>;
+    otherUsers: OtherUser[];
   };
 }
 
-/**
- * components/chat/ChatHeader.tsx
- *
- * Displays at the top of the active conversation.
- * Shows: back button (mobile), other user's avatar + name + online status.
- *
- * The back button uses Link to /chat — this navigates back to the
- * conversation list on mobile (where the sidebar fills the whole screen).
- */
 export function ChatHeader({ conversation }: ChatHeaderProps) {
   const presenceMap = usePresenceMap();
   const otherUser = conversation.otherUsers[0];

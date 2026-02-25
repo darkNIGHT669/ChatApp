@@ -12,13 +12,8 @@ import { MessageInput } from "@/components/chat/MessageInput";
 /**
  * app/chat/[conversationId]/page.tsx
  *
- * The active conversation view. Rendered when a user selects a chat.
- *
- * useParams() gives us the conversationId from the URL.
- * We cast it to Id<"conversations"> — Convex's type-safe ID type.
- *
- * markAsRead is called on mount and whenever conversationId changes.
- * This clears the unread badge in the sidebar.
+ * Fix: otherUsers from Convex can contain null (when ctx.db.get returns null).
+ * We filter and cast to the exact shape ChatHeader expects.
  */
 export default function ConversationPage() {
   const params = useParams();
@@ -29,14 +24,12 @@ export default function ConversationPage() {
     conversationId,
   });
 
-  // Mark as read when conversation is opened
   useEffect(() => {
     if (!conversationId) return;
     markAsRead({ conversationId }).catch(console.error);
   }, [conversationId, markAsRead]);
 
   if (conversation === undefined) {
-    // Loading state
     return (
       <div className="flex flex-col h-full">
         <div className="h-16 border-b border-gray-200 animate-pulse bg-gray-50" />
@@ -54,9 +47,18 @@ export default function ConversationPage() {
     );
   }
 
+  // Filter out nulls and assert the correct shape for TypeScript
+  const safeConversation = {
+    ...conversation,
+    otherUsers: conversation.otherUsers.filter(
+      (u): u is { _id: Id<"users">; name: string; imageUrl: string; clerkId: string; email: string; _creationTime: number } =>
+        u !== null
+    ),
+  };
+
   return (
     <div className="flex flex-col h-full">
-      <ChatHeader conversation={conversation} />
+      <ChatHeader conversation={safeConversation} />
       <MessageList conversationId={conversationId} />
       <MessageInput conversationId={conversationId} />
     </div>
