@@ -2,12 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUser, getAuthUserOrNull } from "./helpers";
 
-/**
- * conversations.ts
- *
- * Queries use getAuthUserOrNull → return [] or null safely if user not synced yet.
- * Mutations use getAuthUser → throw if unauthenticated (correct for writes).
- */
+// ─── DM ──────────────────────────────────────────────────────────────────────
 
 export const getOrCreateDM = mutation({
   args: {
@@ -61,10 +56,64 @@ export const getOrCreateDM = mutation({
   },
 });
 
+// ─── GROUP ───────────────────────────────────────────────────────────────────
+
+/**
+ * Creates a group conversation.
+ *
+ * Design decisions:
+ * - Creator is always added as a member automatically
+ * - memberIds should be OTHER users (not the creator)
+ * - We deduplicate memberIds with a Set to be safe
+ * - Min 1 other member required (2 total) — enforced here and in the UI
+ */
+export const createGroup = mutation({
+  args: {
+    name: v.string(),
+    memberIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, args) => {
+    const currentUser = await getAuthUser(ctx);
+
+    if (args.name.trim() === "") throw new Error("Group name cannot be empty");
+    if (args.memberIds.length < 1)
+      throw new Error("A group needs at least 2 members");
+
+    const now = Date.now();
+
+    const conversationId = await ctx.db.insert("conversations", {
+      isGroup: true,
+      name: args.name.trim(),
+      lastMessageTime: now,
+    });
+
+    // Add creator
+    await ctx.db.insert("members", {
+      conversationId,
+      userId: currentUser._id,
+      lastReadTime: now,
+    });
+
+    // Add selected members (deduplicated, skip self if accidentally included)
+    const uniqueMemberIds = [...new Set(args.memberIds)];
+    for (const memberId of uniqueMemberIds) {
+      if (memberId === currentUser._id) continue;
+      await ctx.db.insert("members", {
+        conversationId,
+        userId: memberId,
+        lastReadTime: 0,
+      });
+    }
+
+    return conversationId;
+  },
+});
+
+// ─── QUERIES ─────────────────────────────────────────────────────────────────
+
 export const listMyConversations = query({
   args: {},
   handler: async (ctx) => {
-    // Safely return empty array if user not synced yet
     const currentUser = await getAuthUserOrNull(ctx);
     if (!currentUser) return [];
 
@@ -115,6 +164,7 @@ export const listMyConversations = query({
         return {
           ...conversation,
           otherUsers: otherUsers.filter(Boolean),
+          memberCount: allMembers.length,
           lastMessage,
           unreadCount,
           myLastReadTime: membership.lastReadTime,
@@ -155,9 +205,15 @@ export const getConversation = query({
       otherMembers.map((m) => ctx.db.get(m.userId))
     );
 
+    const allUsers = await Promise.all(
+      allMembers.map((m) => ctx.db.get(m.userId))
+    );
+
     return {
       ...conversation,
       otherUsers: otherUsers.filter(Boolean),
+      allUsers: allUsers.filter(Boolean),
+      memberCount: allMembers.length,
     };
   },
 });

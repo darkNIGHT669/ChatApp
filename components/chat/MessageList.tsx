@@ -10,52 +10,45 @@ import { TypingIndicator } from "./TypingIndicator";
 
 interface MessageListProps {
   conversationId: Id<"conversations">;
+  isGroup?: boolean;
 }
 
 /**
  * components/chat/MessageList.tsx
  *
- * The scrollable message feed. The most complex component in the app.
+ * Updated to:
+ * 1. Fetch reactions for the entire conversation in ONE query
+ *    (getReactionsForConversation) instead of per-message
+ * 2. Pass reactions down to each MessageItem
+ * 3. Pass isGroup to MessageItem so it shows sender names in groups
  *
- * Smart auto-scroll logic:
- * - If user is at the bottom → auto-scroll when new messages arrive
- * - If user has scrolled up → don't auto-scroll; show "↓ New messages" button
- *
- * How we detect "at bottom":
- * scrollHeight - scrollTop - clientHeight < threshold (20px)
- * If this value is small, the user is near the bottom.
- *
- * Refs we need:
- * - scrollAreaRef: the scrollable container element
- * - bottomRef: an invisible element at the very bottom to scroll into view
- * - isAtBottomRef: tracks scroll position without causing re-renders
- *   (using a ref instead of state avoids the scroll handler causing renders)
+ * Smart auto-scroll logic unchanged.
  */
-export function MessageList({ conversationId }: MessageListProps) {
+export function MessageList({ conversationId, isGroup = false }: MessageListProps) {
   const messages = useQuery(api.messages.list, { conversationId });
+
+  // ONE query for all reactions in this conversation
+  const reactionsMap = useQuery(api.reactions.getReactionsForConversation, {
+    conversationId,
+  });
+
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevMessageCountRef = useRef(0);
 
-  // Track whether user is at the bottom
   const handleScroll = () => {
     const el = scrollAreaRef.current;
     if (!el) return;
-
-    const distanceFromBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const atBottom = distanceFromBottom < 60;
-
     isAtBottomRef.current = atBottom;
     setShowScrollButton(!atBottom);
   };
 
-  // Auto-scroll when new messages arrive (only if already at bottom)
   useEffect(() => {
     if (!messages) return;
-
     const newCount = messages.length;
     const hadNewMessages = newCount > prevMessageCountRef.current;
     prevMessageCountRef.current = newCount;
@@ -63,12 +56,10 @@ export function MessageList({ conversationId }: MessageListProps) {
     if (hadNewMessages && isAtBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     } else if (hadNewMessages && !isAtBottomRef.current) {
-      // User has scrolled up — show the button instead of forcing scroll
       setShowScrollButton(true);
     }
   }, [messages]);
 
-  // Scroll to bottom initially when conversation loads
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
     isAtBottomRef.current = true;
@@ -79,18 +70,14 @@ export function MessageList({ conversationId }: MessageListProps) {
     setShowScrollButton(false);
   };
 
-  // Loading state
   if (messages === undefined) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-gray-400 text-sm animate-pulse">
-          Loading messages...
-        </div>
+        <div className="text-gray-400 text-sm animate-pulse">Loading messages...</div>
       </div>
     );
   }
 
-  // Empty state
   if (messages.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
@@ -105,7 +92,6 @@ export function MessageList({ conversationId }: MessageListProps) {
 
   return (
     <div className="relative flex-1 min-h-0">
-      {/* Scrollable message area */}
       <div
         ref={scrollAreaRef}
         onScroll={handleScroll}
@@ -113,29 +99,28 @@ export function MessageList({ conversationId }: MessageListProps) {
       >
         {messages.map((message, index) => {
           const prevMessage = index > 0 ? messages[index - 1] : null;
-          // Show date divider when the day changes between messages
           const showDateDivider =
-            !prevMessage ||
-            !isSameDay(prevMessage.sentAt, message.sentAt);
+            !prevMessage || !isSameDay(prevMessage.sentAt, message.sentAt);
+
+          // Get reactions for this specific message from the map
+          const messageReactions = reactionsMap?.[message._id] ?? [];
 
           return (
             <div key={message._id}>
-              {showDateDivider && (
-                <DateDivider timestamp={message.sentAt} />
-              )}
-              <MessageItem message={message} />
+              {showDateDivider && <DateDivider timestamp={message.sentAt} />}
+              <MessageItem
+                message={message}
+                reactions={messageReactions}
+                showSenderName={isGroup}
+              />
             </div>
           );
         })}
 
-        {/* Typing indicator sits above the invisible bottom anchor */}
         <TypingIndicator conversationId={conversationId} />
-
-        {/* Invisible anchor for scrollIntoView */}
         <div ref={bottomRef} />
       </div>
 
-      {/* "↓ New messages" button */}
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
@@ -151,7 +136,6 @@ export function MessageList({ conversationId }: MessageListProps) {
   );
 }
 
-// Helper: are two timestamps on the same calendar day?
 function isSameDay(ts1: number, ts2: number): boolean {
   const d1 = new Date(ts1);
   const d2 = new Date(ts2);
@@ -162,7 +146,6 @@ function isSameDay(ts1: number, ts2: number): boolean {
   );
 }
 
-// Date divider between messages from different days
 function DateDivider({ timestamp }: { timestamp: number }) {
   const date = new Date(timestamp);
   const now = new Date();

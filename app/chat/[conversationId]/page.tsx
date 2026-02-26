@@ -9,12 +9,6 @@ import { ChatHeader } from "@/components/chat/ChatHeader";
 import { MessageList } from "@/components/chat/MessageList";
 import { MessageInput } from "@/components/chat/MessageInput";
 
-/**
- * app/chat/[conversationId]/page.tsx
- *
- * Fix: otherUsers from Convex can contain null (when ctx.db.get returns null).
- * We filter and cast to the exact shape ChatHeader expects.
- */
 export default function ConversationPage() {
   const params = useParams();
   const conversationId = params.conversationId as Id<"conversations">;
@@ -47,19 +41,23 @@ export default function ConversationPage() {
     );
   }
 
-  // Filter out nulls and assert the correct shape for TypeScript
-  const safeConversation = {
-    ...conversation,
-    otherUsers: conversation.otherUsers.filter(
-      (u): u is { _id: Id<"users">; name: string; imageUrl: string; clerkId: string; email: string; _creationTime: number } =>
-        u !== null
-    ),
-  };
+  const otherUsers = conversation.otherUsers.flatMap((u) =>
+    u !== null && u !== undefined ? [u] : []
+  );
 
   return (
     <div className="flex flex-col h-full">
-      <ChatHeader conversation={safeConversation} />
-      <MessageList conversationId={conversationId} />
+      <ChatHeader
+        conversationId={conversation._id}
+        isGroup={conversation.isGroup}
+        groupName={conversation.name}
+        otherUsers={otherUsers}
+        memberCount={conversation.memberCount}
+      />
+      <MessageList
+        conversationId={conversationId}
+        isGroup={conversation.isGroup}
+      />
       <MessageInput conversationId={conversationId} />
     </div>
   );
